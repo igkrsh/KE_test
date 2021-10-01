@@ -17,25 +17,25 @@ type Service interface {
 }
 
 type Server struct {
-	elemLimit uint64
-	timeLimit time.Duration
+	ElemLimit uint64
+	TimeLimit time.Duration
 }
 
-func CreateServer(n uint64, p time.Duration) Server {
+func CreateServer(n uint64, p time.Duration) * Server {
 	s := Server{
-		elemLimit: n,
-		timeLimit: p,
+		ElemLimit: n,
+		TimeLimit: p,
 	}
-	return s
+	return &s
 }
 
 func (serv Server) GetLimits() (n uint64, p time.Duration) {
-	return serv.elemLimit, serv.timeLimit
+	return serv.ElemLimit, serv.TimeLimit
 }
 
 func (serv Server) Process(ctx context.Context, batch Batch) error {
 	fmt.Printf("Items sent: %d\n", len(batch))
-	if uint64(len(batch)) <= serv.elemLimit {
+	if uint64(len(batch)) <= serv.ElemLimit {
 		return nil
 	} else {
 		return ErrBlocked

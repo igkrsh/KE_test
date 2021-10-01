@@ -5,7 +5,7 @@ import (
 )
 
 func main() {
-	serv := CreateServer(100000, 500 * time.Millisecond)
+	serv := CreateServer(10000, 5000 * time.Millisecond)
 	cli := CreateClient(serv)
-	cli.Send()
+	cli.Schedule()
 }
