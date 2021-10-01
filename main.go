@@ -1,9 +1,11 @@
 package main
 
 import (
-	"fmt"
+	"time"
 )
 
 func main() {
-	fmt.Println("Hello")
+	serv := CreateServer(100000, 500 * time.Millisecond)
+	cli := CreateClient(serv)
+	cli.Send()
 }
