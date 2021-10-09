@@ -37,48 +37,60 @@ func (cli Client) fillBatch(itemChannel chan Item, batchChannel chan Batch, batc
 }
 
 func (cli Client) sendBatch(batchChannel chan Batch, errors chan error) {
-	batch := <- batchChannel
-	con := context.Background()
-	err := cli.serv.Process(con, batch)
-	if err != nil {
-		errors <- err
+	for {
+		batch := <-batchChannel
+		con := context.Background()
+		err := cli.serv.Process(con, batch)
+		if err != nil {
+			errors <- err
+		}
+		errors <- nil
+		time.Sleep(cli.timeLimit)
 	}
-	errors <- nil
+}
+
+func (cli Client) addToBatch(processed chan bool, itemChannel chan Item, item Item) {
+	for {
+		itemChannel <- item
+		processed <- true
+	}
 }
 
 func (cli Client) Schedule() error {
 	itemChannel := make(chan Item, cli.elemLimit)
-	batchChannel := make(chan Batch, 3)
+	batchChannel := make(chan Batch, 5)
 	processed := make(chan bool)
 	errors := make(chan error)
-	elemsLeft := cli.elemLimit
-	ctx := context.Background()
-	ctx, cancel := context.WithTimeout(ctx, cli.timeLimit)
-	for i := 0; uint64(i) < cli.elemLimit; i++ {
-		go cli.addToBatch(processed, itemChannel, Item{num: i})
-	}
-	_ = time.AfterFunc(cli.timeLimit, func () {cli.sendBatch(batchChannel, errors)})
-	for i := 0; uint64(i) < cli.elemLimit; i++ {
-		select {
-		case <-processed:
-			elemsLeft--
-			fmt.Printf("Elems left: %d\n", elemsLeft)
-			if elemsLeft == 0 {
-				go cli.fillBatch(itemChannel, batchChannel, int(cli.elemLimit))
-				<-ctx.Done()
-				cancel()
-			}
-		case <-ctx.Done():
-			fmt.Println("Killed by a timeout")
-			go cli.fillBatch(itemChannel, batchChannel, int(cli.elemLimit - elemsLeft))
-		case err := <- errors:
-			return err
+	go cli.produce(itemChannel, processed, batchChannel)
+	go cli.sendBatch(batchChannel, errors)
+	for {
+		error := <- errors
+		if error != nil {
+			return error
 		}
 	}
-	return nil
 }
 
-func (cli Client) addToBatch(processed chan bool, itemChannel chan Item, item Item) {
-	itemChannel <- item
-	processed <- true
+func (cli Client) produce(itemChannel chan Item, processed chan bool, batchChannel chan Batch) {
+	for {
+		elemsLeft := cli.elemLimit
+		ctx := context.Background()
+		ctx, cancel := context.WithTimeout(ctx, cli.timeLimit)
+		for i := 0; i < 1000; i++ {
+			go cli.addToBatch(processed, itemChannel, Item{num: i})
+		}
+		for i := 0; uint64(i) < cli.elemLimit; i++ {
+			select {
+			case <-processed:
+				elemsLeft--
+				if elemsLeft == 0 {
+					go cli.fillBatch(itemChannel, batchChannel, int(cli.elemLimit))
+					cancel()
+					fmt.Printf("Items produced. Batches in channel: %d\n", len(batchChannel))
+				}
+			case <-ctx.Done():
+				go cli.fillBatch(itemChannel, batchChannel, int(cli.elemLimit-elemsLeft))
+			}
+		}
+	}
 }
