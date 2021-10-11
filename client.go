@@ -7,9 +7,9 @@ import (
 )
 
 type Sender interface {
-	SendBatch() error
-	fillBatch(itemChannel chan Item, batchChannel chan Batch, batchSize int)
-	addToBatch(processed chan bool, itemChannel chan Item, item Item)
+	Schedule() error
+	sendBatch(batchChannel chan Batch, errors chan error)
+	produce(itemChannel chan Item, processed chan bool, batchChannel chan Batch)
 }
 
 type Client struct {
@@ -37,7 +37,7 @@ func (cli Client) fillBatch(itemChannel chan Item, batchChannel chan Batch, batc
 }
 
 func (cli Client) sendBatch(batchChannel chan Batch, errors chan error) {
-	for {
+	for i := 0; i < 10; i++ {
 		batch := <-batchChannel
 		con := context.Background()
 		err := cli.serv.Process(con, batch)
@@ -72,7 +72,7 @@ func (cli Client) Schedule() error {
 }
 
 func (cli Client) produce(itemChannel chan Item, processed chan bool, batchChannel chan Batch) {
-	for {
+	for i := 0; i < 10; i++ {
 		elemsLeft := cli.elemLimit
 		ctx := context.Background()
 		ctx, cancel := context.WithTimeout(ctx, cli.timeLimit)
