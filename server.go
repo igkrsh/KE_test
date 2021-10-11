@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -15,8 +16,39 @@ type Service interface {
 	Process(ctx context.Context, batch Batch) error
 }
 
+type Server struct {
+	ElemLimit uint64
+	TimeLimit time.Duration
+	lastSent time.Time
+}
+
+func CreateServer(n uint64, p time.Duration) * Server {
+	s := Server{
+		ElemLimit: n,
+		TimeLimit: p,
+		lastSent: time.Now(),
+	}
+	return &s
+}
+
+func (serv Server) GetLimits() (n uint64, p time.Duration) {
+	return serv.ElemLimit, serv.TimeLimit
+}
+
+func (serv Server) Process(ctx context.Context, batch Batch) error {
+	fmt.Printf("Items sent: %d\n", len(batch))
+	fmt.Printf("Receive timing: %s\n", time.Since(serv.lastSent))
+	serv.lastSent = time.Now()
+	if uint64(len(batch)) <= serv.ElemLimit {
+		return nil
+	} else {
+		return ErrBlocked
+	}
+}
+
 // Batch is a batch of items.
 type Batch []Item
 
 // Item is some abstract item.
-type Item struct{}
+type Item struct{
+}
