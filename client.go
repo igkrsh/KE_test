@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"time"
 )
 
@@ -28,16 +27,26 @@ func CreateClient (serv * Server) * Client {
 	return &c
 }
 
-func (cli Client) fillBatch(itemChannel chan Item, batchChannel chan Batch, batchSize int) {
-	batch := make([]Item, batchSize)
-	for i := 0; i < batchSize; i++  {
-		batch[i] = <-itemChannel
+func (cli Client) fillBatch(itemChannel chan Item, batchChannel chan Batch, timer * time.Timer, batchSize int) {
+	var batch []Item = nil
+	for {
+		select {
+		case item := <-itemChannel:
+			batch = append(batch, item)
+			if len(batch) == int(cli.elemLimit) {
+				batchChannel <- batch
+				batch = nil
+			}
+		case <-timer.C :
+			batchChannel <- batch
+			batch = nil
+			timer = time.NewTimer(cli.timeLimit)
+		}
 	}
-	batchChannel <- batch
 }
 
 func (cli Client) sendBatch(batchChannel chan Batch, errors chan error) {
-	for i := 0; i < 10; i++ {
+	for {
 		batch := <-batchChannel
 		con := context.Background()
 		err := cli.serv.Process(con, batch)
@@ -49,20 +58,23 @@ func (cli Client) sendBatch(batchChannel chan Batch, errors chan error) {
 	}
 }
 
-func (cli Client) addToBatch(processed chan bool, itemChannel chan Item, item Item) {
+func (cli Client) addToBatch(itemChannel chan<- Item) {
 	for {
-		itemChannel <- item
-		processed <- true
+		itemChannel <- Item{}
 	}
 }
 
 func (cli Client) Schedule() error {
 	itemChannel := make(chan Item, cli.elemLimit)
 	batchChannel := make(chan Batch, 5)
-	processed := make(chan bool)
 	errors := make(chan error)
-	go cli.produce(itemChannel, processed, batchChannel)
+	go cli.produce(itemChannel, batchChannel)
 	go cli.sendBatch(batchChannel, errors)
+	defer func() {
+		close(itemChannel)
+		close(batchChannel)
+		close(errors)
+	}()
 	for {
 		error := <- errors
 		if error != nil {
@@ -71,26 +83,11 @@ func (cli Client) Schedule() error {
 	}
 }
 
-func (cli Client) produce(itemChannel chan Item, processed chan bool, batchChannel chan Batch) {
-	for i := 0; i < 10; i++ {
-		elemsLeft := cli.elemLimit
-		ctx := context.Background()
-		ctx, cancel := context.WithTimeout(ctx, cli.timeLimit)
-		for i := 0; i < 1000; i++ {
-			go cli.addToBatch(processed, itemChannel, Item{num: i})
-		}
-		for i := 0; uint64(i) < cli.elemLimit; i++ {
-			select {
-			case <-processed:
-				elemsLeft--
-				if elemsLeft == 0 {
-					go cli.fillBatch(itemChannel, batchChannel, int(cli.elemLimit))
-					cancel()
-					fmt.Printf("Items produced. Batches in channel: %d\n", len(batchChannel))
-				}
-			case <-ctx.Done():
-				go cli.fillBatch(itemChannel, batchChannel, int(cli.elemLimit-elemsLeft))
-			}
-		}
+func (cli Client) produce(itemChannel chan Item, batchChannel chan Batch) {
+	numOfWorkers := 100000
+	timer := time.NewTimer(cli.timeLimit)
+	for i := 0; i < numOfWorkers; i++ {
+		go cli.addToBatch(itemChannel)
 	}
+	go cli.fillBatch(itemChannel, batchChannel, timer, int(cli.elemLimit))
 }

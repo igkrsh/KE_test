@@ -51,5 +51,4 @@ type Batch []Item
 
 // Item is some abstract item.
 type Item struct{
-	num int
 }
