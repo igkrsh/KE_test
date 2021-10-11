@@ -7,22 +7,22 @@ import (
 
 type Sender interface {
 	Produce() error
-	addToBatch(itemChannel chan<- Item)
-	sendBatch(batchChannel chan Batch, errors chan error)
-	fillBatch(itemChannel chan Item, batchChannel chan Batch, timer * time.Timer)
+	addToBatch()
+	sendBatch()
+	fillBatch()
 }
 
 type Client struct {
 	elemLimit uint64
 	timeLimit time.Duration
 	serv * Server
-	itemChannel chan Item
-	batchChannel chan Batch
-	errors chan error
+	itemChannel chan Item    // buffered channel for items
+	batchChannel chan Batch  // buffered channel for batches
+	errors chan error        // channel for errors from server
 }
 
 func CreateClient (serv * Server) * Client {
-	elemLim, timeLim := serv.GetLimits()
+	elemLim, timeLim := serv.GetLimits() // get params from server
 	c := Client{
 		elemLimit:    elemLim,
 		timeLimit:    timeLim,
@@ -36,9 +36,12 @@ func CreateClient (serv * Server) * Client {
 
 func (cli * Client) fillBatch() {
 	var batch []Item = nil
-	timer := time.NewTimer(cli.timeLimit)
+	timer := time.NewTimer(cli.timeLimit) // timer for stopping generation if the batch is not filled
 	for {
 		select {
+		// get the generated item from channel
+		// add item to the batch and then check if the batch is filled
+		// if the batch is full, send it to the batch channel, then reset the batch and timer
 		case item := <-cli.itemChannel:
 			batch = append(batch, item)
 			if len(batch) == int(cli.elemLimit) {
@@ -46,6 +49,8 @@ func (cli * Client) fillBatch() {
 				batch = nil
 				timer = time.NewTimer(cli.timeLimit)
 			}
+		// if the timer is fired, send the batch, even if it not filled, to the batch channel
+		// then reset the timer and the batch
 		case <-timer.C :
 			cli.batchChannel <- batch
 			batch = nil
@@ -56,14 +61,15 @@ func (cli * Client) fillBatch() {
 
 func (cli * Client) sendBatch() {
 	for {
-		batch := <-cli.batchChannel
-		con := context.Background()
+		batch := <-cli.batchChannel // receive the batch from channel
+		con := context.TODO()
 		err := cli.serv.Process(con, batch)
+		// check if server executed without errors
 		if err != nil {
 			cli.errors <- err
 		}
 		cli.errors <- nil
-		time.Sleep(cli.timeLimit)
+		time.Sleep(cli.timeLimit) // sleep until the server is ready to receive a new batch
 	}
 }
 
@@ -75,6 +81,7 @@ func (cli * Client) addToBatch() {
 
 func (cli * Client) Produce() error {
 	numOfWorkers := 1000
+	// create async producers which will generate items
 	for i := 0; i < numOfWorkers; i++ {
 		go cli.addToBatch()
 	}
@@ -82,6 +89,7 @@ func (cli * Client) Produce() error {
 	go cli.sendBatch()
 	for {
 		error := <- cli.errors
+		// check if server returned an error, continue execution if not
 		if error != nil {
 			return error
 		}
