@@ -16,74 +16,72 @@ type Client struct {
 	elemLimit uint64
 	timeLimit time.Duration
 	serv * Server
+	itemChannel chan Item
+	batchChannel chan Batch
+	errors chan error
 }
 
 func CreateClient (serv * Server) * Client {
 	elemLim, timeLim := serv.GetLimits()
 	c := Client{
-		elemLimit: elemLim,
-		timeLimit: timeLim,
-		serv:      serv,
+		elemLimit:    elemLim,
+		timeLimit:    timeLim,
+		serv:         serv,
+		itemChannel:  make(chan Item, elemLim),
+		batchChannel: make(chan Batch, 5),
+		errors:       make(chan error),
 	}
 	return &c
 }
 
-func (cli Client) fillBatch(itemChannel chan Item, batchChannel chan Batch, timer * time.Timer) {
+func (cli * Client) fillBatch() {
 	var batch []Item = nil
+	timer := time.NewTimer(cli.timeLimit)
 	for {
 		select {
-		case item := <-itemChannel:
+		case item := <-cli.itemChannel:
 			batch = append(batch, item)
 			if len(batch) == int(cli.elemLimit) {
-				batchChannel <- batch
+				cli.batchChannel <- batch
 				batch = nil
 				timer = time.NewTimer(cli.timeLimit)
 			}
 		case <-timer.C :
-			batchChannel <- batch
+			cli.batchChannel <- batch
 			batch = nil
 			timer = time.NewTimer(cli.timeLimit)
 		}
 	}
 }
 
-func (cli Client) sendBatch(batchChannel chan Batch, errors chan error) {
+func (cli * Client) sendBatch() {
 	for {
-		batch := <-batchChannel
+		batch := <-cli.batchChannel
 		con := context.Background()
 		err := cli.serv.Process(con, batch)
 		if err != nil {
-			errors <- err
+			cli.errors <- err
 		}
-		errors <- nil
+		cli.errors <- nil
 		time.Sleep(cli.timeLimit)
 	}
 }
 
-func (cli Client) addToBatch(itemChannel chan<- Item) {
+func (cli * Client) addToBatch() {
 	for {
-		itemChannel <- Item{}
+		cli.itemChannel <- Item{}
 	}
 }
 
-func (cli Client) Produce() error {
-	itemChannel := make(chan Item, cli.elemLimit)
-	batchChannel := make(chan Batch, 5)
-	errors := make(chan error)
-	numOfWorkers := 10000
-	timer := time.NewTimer(cli.timeLimit)
+func (cli * Client) Produce() error {
+	numOfWorkers := 1000
 	for i := 0; i < numOfWorkers; i++ {
-		go cli.addToBatch(itemChannel)
+		go cli.addToBatch()
 	}
-	go cli.fillBatch(itemChannel, batchChannel, timer)
-	go cli.sendBatch(batchChannel, errors)
-	defer func() {
-		close(itemChannel)
-		close(batchChannel)
-		close(errors)
-	}()
+	go cli.fillBatch()
+	go cli.sendBatch()
 	for {
-		error := <- errors
+		error := <- cli.errors
 		if error != nil {
 			return error
 		}
