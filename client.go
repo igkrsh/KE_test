@@ -6,9 +6,10 @@ import (
 )
 
 type Sender interface {
-	Schedule() error
+	Produce() error
+	addToBatch(itemChannel chan<- Item)
 	sendBatch(batchChannel chan Batch, errors chan error)
-	produce(itemChannel chan Item, processed chan bool, batchChannel chan Batch)
+	fillBatch(itemChannel chan Item, batchChannel chan Batch, timer * time.Timer)
 }
 
 type Client struct {
@@ -27,7 +28,7 @@ func CreateClient (serv * Server) * Client {
 	return &c
 }
 
-func (cli Client) fillBatch(itemChannel chan Item, batchChannel chan Batch, timer * time.Timer, batchSize int) {
+func (cli Client) fillBatch(itemChannel chan Item, batchChannel chan Batch, timer * time.Timer) {
 	var batch []Item = nil
 	for {
 		select {
@@ -36,6 +37,7 @@ func (cli Client) fillBatch(itemChannel chan Item, batchChannel chan Batch, time
 			if len(batch) == int(cli.elemLimit) {
 				batchChannel <- batch
 				batch = nil
+				timer = time.NewTimer(cli.timeLimit)
 			}
 		case <-timer.C :
 			batchChannel <- batch
@@ -64,11 +66,16 @@ func (cli Client) addToBatch(itemChannel chan<- Item) {
 	}
 }
 
-func (cli Client) Schedule() error {
+func (cli Client) Produce() error {
 	itemChannel := make(chan Item, cli.elemLimit)
 	batchChannel := make(chan Batch, 5)
 	errors := make(chan error)
-	go cli.produce(itemChannel, batchChannel)
+	numOfWorkers := 10000
+	timer := time.NewTimer(cli.timeLimit)
+	for i := 0; i < numOfWorkers; i++ {
+		go cli.addToBatch(itemChannel)
+	}
+	go cli.fillBatch(itemChannel, batchChannel, timer)
 	go cli.sendBatch(batchChannel, errors)
 	defer func() {
 		close(itemChannel)
@@ -81,13 +88,4 @@ func (cli Client) Schedule() error {
 			return error
 		}
 	}
-}
-
-func (cli Client) produce(itemChannel chan Item, batchChannel chan Batch) {
-	numOfWorkers := 100000
-	timer := time.NewTimer(cli.timeLimit)
-	for i := 0; i < numOfWorkers; i++ {
-		go cli.addToBatch(itemChannel)
-	}
-	go cli.fillBatch(itemChannel, batchChannel, timer, int(cli.elemLimit))
 }
