@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -33,7 +34,7 @@ func TestClient_ElementLimit (t *testing.T) {
 	cli := CreateClient(&serv)
 	ProcessMock = func(ctx context.Context, batch Batch) error {
 		if len(batch) > int(elemLimit) {
-			t.Errorf("Client sent more items than required")
+			t.Error("Client sent more items than required")
 		}
 		return nil
 	}
@@ -68,4 +69,21 @@ func TestClient_TimeLimit (t *testing.T) {
 	go cli.Produce()
 	time.Sleep(5 * time.Second)
 	cancel()
+}
+
+func TestClient_ServerBlock (t *testing.T) {
+	var elemLimit uint64 = 100
+	timeLimit := 1000 * time.Millisecond
+	serv := ServerMock{
+		ElemLimit: elemLimit,
+		TimeLimit: timeLimit,
+	}
+	cli := CreateClient(&serv)
+	ProcessMock = func(ctx context.Context, batch Batch) error {
+		return errors.New("blocked")
+	}
+	err := cli.Produce()
+	if err == nil {
+		t.Error("Client didn't catch the error from server")
+	}
 }

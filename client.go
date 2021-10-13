@@ -5,31 +5,30 @@ import (
 	"time"
 )
 
-type Sender interface {
-	Produce() error
+type Producer interface {
 	addToBatch()
 	sendBatch()
 	fillBatch()
 }
 
 type Client struct {
-	elemLimit uint64
-	timeLimit time.Duration
-	serv * Service
-	itemChannel chan Item    // buffered channel for items
-	batchChannel chan Batch  // buffered channel for batches
-	errors chan error        // channel for errors from server
+	elemLimit     uint64
+	timeLimit     time.Duration
+	serv          * Service
+	itemChannel   chan Item  // buffered channel for items
+	batchChannel  chan Batch // buffered channel for batches
+	errorsChannel chan error // channel for errorsChannel from server
 }
 
 func CreateClient (serv Service) * Client {
 	elemLim, timeLim := serv.GetLimits() // get params from server
 	c := Client{
-		elemLimit:    elemLim,
-		timeLimit:    timeLim,
-		serv:         &serv,
-		itemChannel:  make(chan Item, elemLim),
-		batchChannel: make(chan Batch, 5),
-		errors:       make(chan error),
+		elemLimit:     elemLim,
+		timeLimit:     timeLim,
+		serv:          &serv,
+		itemChannel:   make(chan Item, elemLim),
+		batchChannel:  make(chan Batch, 5),
+		errorsChannel: make(chan error),
 	}
 	return &c
 }
@@ -64,11 +63,12 @@ func (cli * Client) sendBatch() {
 		batch := <-cli.batchChannel // receive the batch from channel
 		con := context.TODO()
 		err := (*cli.serv).Process(con, batch)
-		// check if server executed without errors
+		// check if server executed without errorsChannel
 		if err != nil {
-			cli.errors <- err
+			cli.errorsChannel <- err
+			return
 		}
-		cli.errors <- nil
+		cli.errorsChannel <- nil
 		time.Sleep(cli.timeLimit) // sleep until the server is ready to receive a new batch
 	}
 }
@@ -88,7 +88,7 @@ func (cli * Client) Produce() error {
 	go cli.fillBatch()
 	go cli.sendBatch()
 	for {
-		err := <- cli.errors
+		err := <- cli.errorsChannel
 		// check if server returned an error, continue execution if not
 		if err != nil {
 			return err
