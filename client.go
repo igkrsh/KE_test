@@ -15,18 +15,18 @@ type Sender interface {
 type Client struct {
 	elemLimit uint64
 	timeLimit time.Duration
-	serv * Server
+	serv * Service
 	itemChannel chan Item    // buffered channel for items
 	batchChannel chan Batch  // buffered channel for batches
 	errors chan error        // channel for errors from server
 }
 
-func CreateClient (serv * Server) * Client {
+func CreateClient (serv Service) * Client {
 	elemLim, timeLim := serv.GetLimits() // get params from server
 	c := Client{
 		elemLimit:    elemLim,
 		timeLimit:    timeLim,
-		serv:         serv,
+		serv:         &serv,
 		itemChannel:  make(chan Item, elemLim),
 		batchChannel: make(chan Batch, 5),
 		errors:       make(chan error),
@@ -63,7 +63,7 @@ func (cli * Client) sendBatch() {
 	for {
 		batch := <-cli.batchChannel // receive the batch from channel
 		con := context.TODO()
-		err := cli.serv.Process(con, batch)
+		err := (*cli.serv).Process(con, batch)
 		// check if server executed without errors
 		if err != nil {
 			cli.errors <- err
@@ -88,10 +88,10 @@ func (cli * Client) Produce() error {
 	go cli.fillBatch()
 	go cli.sendBatch()
 	for {
-		error := <- cli.errors
+		err := <- cli.errors
 		// check if server returned an error, continue execution if not
-		if error != nil {
-			return error
+		if err != nil {
+			return err
 		}
 	}
 }
