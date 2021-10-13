@@ -44,7 +44,7 @@ func TestClient_ElementLimit (t *testing.T) {
 
 func TestClient_TimeLimit (t *testing.T) {
 	var elemLimit uint64 = 100
-	timeLimit := 200 * time.Millisecond
+	timeLimit := 1000 * time.Millisecond
 	serv := ServerMock{
 		ElemLimit: elemLimit,
 		TimeLimit: timeLimit,
@@ -53,14 +53,19 @@ func TestClient_TimeLimit (t *testing.T) {
 	ctx, cancel := context.WithCancel(ctx)
 	cli := CreateClient(&serv)
 	lastSent := time.Now()
+	first := true
 	ProcessMock = func(ctx context.Context, batch Batch) error {
-		if time.Since(lastSent) > timeLimit {
-			t.Errorf("Client failed the time limit requirement. Time between batches %s", time.Since(lastSent))
+		if !first {
+			timePassed := time.Since(lastSent)
+			if timePassed >= timeLimit {
+				t.Errorf("Client failed the time limit requirement. Time between batches %s", timePassed)
+			}
+			lastSent = time.Now()
 		}
-		lastSent = time.Now()
+		first = false
 		return nil
 	}
 	go cli.Produce()
-	time.Sleep(2 * time.Second)
+	time.Sleep(5 * time.Second)
 	cancel()
 }
